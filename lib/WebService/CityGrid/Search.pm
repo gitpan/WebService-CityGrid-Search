@@ -11,30 +11,37 @@ WebService::CityGrid::Search - Interface to the CityGrid Search API
 
 use Any::Moose;
 use Any::URI::Escape;
+use XML::LibXML;
+use LWP::UserAgent;
 
 has 'api_key'   => ( is => 'ro', isa => 'Str', required => 1 );
 has 'publisher' => ( is => 'ro', isa => 'Str', required => 1 );
 
+use constant DEBUG => $ENV{CG_DEBUG} || 0;
+
 our $api_host = 'api2.citysearch.com';
 our $api_base = "http://$api_host/search/";
-our $VERSION  = '0.01';
+our $VERSION  = 0.02;
+
+our $Ua = LWP::UserAgent->new( agent => join( '_', __PACKAGE__, $VERSION ) );
+our $Parser = XML::LibXML->new;
 
 =head1 METHODS
 
 =over 4
 
-=item make_url
+=item query
 
-  $url = $cs->make_url({
+  $res = $cs->query({
       mode => 'locations', 
       where => '90210',
       what  => 'pizza%20and%20burgers', });
 
-Construct a url to make a call against the CityGrid API.
+Queries the web service.  Dies if the http request fails, so eval it!
 
 =cut
 
-sub make_url {
+sub query {
     my ( $self, $args ) = @_;
 
     die "key mode missing, can be locations or events"
@@ -64,7 +71,52 @@ sub make_url {
     }
     $url = substr( $url, 0, length($url) - 1 );
 
-    return $url;
+    my $ua  = LWP::UserAgent->new;
+    my $res = $ua->get($url);
+
+    die "query for $url failed!" unless $res->is_success;
+
+    my $dom = $Parser->load_xml( string => $res->decoded_content );
+    my @locations = $dom->documentElement->getElementsByTagName('location');
+
+    my @results;
+    foreach my $loc (@locations) {
+
+        warn("raw location: " . $loc->toString) if DEBUG;
+        my $name = $loc->getElementsByTagName('name')->[0]->firstChild->data;
+        my $tagline = $loc->getElementsByTagName('tagline')->[0];
+        my $img = $loc->getElementsByTagName('image')->[0];
+        my $nbh = $loc->getElementsByTagName('neighborhood')->[0];
+        my $sc = $loc->getElementsByTagName('samplecategories')->[0];
+        my %res_args        = (
+            id   => $loc->getAttribute('id'),
+            name => $loc->getElementsByTagName('name')->[0]->firstChild->data,
+            profile =>
+              $loc->getElementsByTagName('profile')->[0]->firstChild->data,
+
+          );
+
+        if ($sc && $sc->firstChild) {
+            $res_args{samplecategories} = $sc->firstChild->data;
+        }
+
+        if ($nbh && $nbh->firstChild) {
+            $res_args{neighborhood} = $nbh->firstChild->data;
+        }
+
+        if ($img) {
+            $res_args{image} = $img->firstChild->data;
+        }
+
+        if ($tagline) {
+            $res_args{tagline} = $tagline->firstChild->data;
+        }
+        my $result = WebService::CityGrid::Search::Result->new(%res_args);
+
+        push @results, $result;
+    }
+
+    return \@results;
 }
 
 =item javascript_tracker
@@ -99,6 +151,19 @@ END
 }
 
 __PACKAGE__->meta->make_immutable;
+
+package WebService::CityGrid::Search::Result;
+
+use Any::Moose;
+
+has 'id'      => ( is => 'ro', isa => 'Int', required => 1 );
+has 'name'    => ( is => 'ro', isa => 'Str', required => 1 );
+has 'tagline' => ( is => 'ro', isa => 'Str', required => 0 );
+has 'profile' => ( is => 'ro', isa => 'Str', required => 1 );
+has 'image'   => ( is => 'ro', isa => 'Str', required => 0 );
+has 'top_hit' => ( is => 'rw', isa => 'Int', required => 0 );
+has 'neighborhood' => ( is => 'rw', isa => 'Str', required => 0 );
+has 'samplecategories' => ( is => 'rw', isa => 'Str', required => 0 );
 
 1;
 

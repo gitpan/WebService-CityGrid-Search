@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               WebService-CityGrid-Search
-version:            0.02
+version:            0.03
 abstract:           Interface to the CityGrid Search API
 author:
     - Fred Moyer <fred@slwifi.com>
@@ -13,6 +13,8 @@ build_requires:
 requires:
     Any::Moose:        0
     Any::URI::Escape:  0
+    LWP::UserAgent:    0
+    XML::LibXML:       0
 no_index:
     directory:
         - t
